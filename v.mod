@@ -1,7 +1,7 @@
 Module {
-	name: 'V_sokol_gp'
-	description: ''
-	version: ''
-	license: ''
+	name: 'sokolgp'
+	description: 'Wrapper for sokol-gp.'
+	version: '0.0.1'
+	license: 'MIT'
 	dependencies: []
 }
