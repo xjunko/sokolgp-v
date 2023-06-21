@@ -1,13 +1,12 @@
 # SokolGP-V
-a V wrapper for the sokol_gp library, forked from [mohamedLT's V_sokol_gp](https://github.com/mohamedLT/V_sokol_gp)
+A V wrapper for the sokol-gp library, forked from [mohamedLT's V_sokol_gp](https://github.com/mohamedLT/V_sokol_gp). <br/>
+To use with [Project Kurarin](https://github.com/FireRedz/kurarin).
 
-# Sokol_gp
+# About Sokol-GP
 Sokol_gp is a 2d rendering library for Sokol that has many optimations to it like batch rendering plus it is super easy to use and setup 
-# install
+# Install
 `v install https://github.com/xjunko/sokolgp-v`
-# supported platforms 
-basically, it runs where Sokol runs 
-for android you can use vab 
+
 # Example :
 ```
 import gg
