@@ -377,6 +377,15 @@ MIT, see LICENSE file or the end of `sokol_gp.h` file.
 #endif
 #endif
 
+#ifndef SOKOL_LOG
+    #ifdef SOKOL_DEBUG
+        #include <stdio.h>
+        #define SOKOL_LOG(s) { SOKOL_ASSERT(s); puts(s); }
+    #else
+        #define SOKOL_LOG(s)
+    #endif
+#endif
+
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -479,6 +488,7 @@ typedef struct sgp_state {
     sgp_mat2x3 proj;
     sgp_mat2x3 transform;
     sgp_mat2x3 mvp;
+    float thickness;
     sgp_color color;
     sgp_images_uniform images;
     sgp_uniform uniform;
@@ -1103,9 +1113,9 @@ void sgp_setup(const sgp_desc* desc) {
     _sgp.num_vertices = _sgp.desc.max_vertices;
     _sgp.num_commands = _sgp.desc.max_commands;
     _sgp.num_uniforms = _sgp.desc.max_commands;
-    _sgp.vertices = (_sgp_vertex*) SOKOL_MALLOC(_sgp.num_vertices * sizeof(_sgp_vertex)); 
-    _sgp.uniforms = (sgp_uniform*) SOKOL_MALLOC(_sgp.num_uniforms * sizeof(sgp_uniform));
-    _sgp.commands = (_sgp_command*) SOKOL_MALLOC(_sgp.num_commands * sizeof(_sgp_command));
+    _sgp.vertices = (_sgp_vertex*) _sg_malloc(_sgp.num_vertices * sizeof(_sgp_vertex));
+    _sgp.uniforms = (sgp_uniform*) _sg_malloc(_sgp.num_uniforms * sizeof(sgp_uniform));
+    _sgp.commands = (_sgp_command*) _sg_malloc(_sgp.num_commands * sizeof(_sgp_command));
     if(!_sgp.commands || !_sgp.uniforms || !_sgp.commands) {
         sgp_shutdown();
         _sgp_set_error(SGP_ERROR_ALLOC_FAILED);
@@ -1183,11 +1193,11 @@ void sgp_shutdown(void) {
     SOKOL_ASSERT(_sgp.init_cookie == _SGP_INIT_COOKIE);
     SOKOL_ASSERT(_sgp.cur_state == 0);
     if(_sgp.vertices)
-        SOKOL_FREE(_sgp.vertices);
+        _sg_free(_sgp.vertices);
     if(_sgp.uniforms)
-        SOKOL_FREE(_sgp.uniforms);
+        _sg_free(_sgp.uniforms);
     if(_sgp.commands)
-        SOKOL_FREE(_sgp.commands);
+        _sg_free(_sgp.commands);
     for(uint32_t i=0;i<_SG_PRIMITIVETYPE_NUM*_SGP_BLENDMODE_NUM;++i) {
         sg_pipeline pip = _sgp.pipelines[i];
         if(pip.id != SG_INVALID_ID)
@@ -1289,6 +1299,7 @@ void sgp_begin(int width, int height) {
     _sgp.state.proj = _sgp_default_proj(width, height);
     _sgp.state.transform = _sgp_mat3_identity;
     _sgp.state.mvp = _sgp.state.proj;
+    _sgp.state.thickness = _sg_max(1.0f / width, 1.0f / height);
     _sgp.state.color = _sgp_white_color;
     memset(&_sgp.state.uniform, 0, sizeof(sgp_uniform));
     _sgp.state.uniform.size = sizeof(sgp_color);
@@ -1737,6 +1748,7 @@ void sgp_viewport(int x, int y, int w, int h) {
     }
 
     _sgp.state.viewport = viewport;
+    _sgp.state.thickness = _sg_max(1.0f / w, 1.0f / h);
     _sgp.state.proj = _sgp_default_proj(w, h);
     _sgp.state.mvp = _sgp_mul_proj_transform(&_sgp.state.proj, &_sgp.state.transform);
 }
@@ -1999,7 +2011,7 @@ static void _sgp_transform_vec2(sgp_mat2x3* matrix, sgp_vec2* dst, const sgp_vec
     }
 }
 
-static void _sgp_draw_solid_pip(sg_pipeline pip, const sgp_vec2* vertices, uint32_t num_vertices) {
+static void _sgp_draw_solid_pip(sg_pipeline pip, const sgp_vec2* vertices, uint32_t num_vertices, float thickness) {
     uint32_t vertex_index = _sgp.cur_vertex;
     _sgp_vertex* transformed_vertices = _sgp_next_vertices(num_vertices);
     if(SOKOL_UNLIKELY(!vertices)) return;
@@ -2008,10 +2020,10 @@ static void _sgp_draw_solid_pip(sg_pipeline pip, const sgp_vec2* vertices, uint3
     _sgp_region region = {FLT_MAX, FLT_MAX, -FLT_MAX, -FLT_MAX};
     for(uint32_t i=0;i<num_vertices;++i) {
         sgp_vec2 p = _sgp_mat3_vec2_mul(&mvp, &vertices[i]);
-        region.x1 = _sg_min(region.x1, p.x);
-        region.y1 = _sg_min(region.y1, p.y);
-        region.x2 = _sg_max(region.x2, p.x);
-        region.y2 = _sg_max(region.y2, p.y);
+        region.x1 = _sg_min(region.x1, p.x - thickness);
+        region.y1 = _sg_min(region.y1, p.y - thickness);
+        region.x2 = _sg_max(region.x2, p.x + thickness);
+        region.y2 = _sg_max(region.y2, p.y + thickness);
         transformed_vertices[i].position = p;
         transformed_vertices[i].texcoord.x = 0.0f;
         transformed_vertices[i].texcoord.y = 0.0f;
@@ -2058,7 +2070,7 @@ void sgp_draw_points(const sgp_point* points, uint32_t count) {
     SOKOL_ASSERT(_sgp.cur_state > 0);
     if(SOKOL_UNLIKELY(count == 0)) return;
     sg_pipeline pip = _sgp_lookup_pipeline(SG_PRIMITIVETYPE_POINTS, _sgp.state.blend_mode);
-    _sgp_draw_solid_pip(pip, points, count);
+    _sgp_draw_solid_pip(pip, points, count, _sgp.state.thickness);
 }
 
 void sgp_draw_point(float x, float y) {
@@ -2073,7 +2085,7 @@ void sgp_draw_lines(const sgp_line* lines, uint32_t count) {
     SOKOL_ASSERT(_sgp.cur_state > 0);
     if(SOKOL_UNLIKELY(count == 0)) return;
     sg_pipeline pip = _sgp_lookup_pipeline(SG_PRIMITIVETYPE_LINES, _sgp.state.blend_mode);
-    _sgp_draw_solid_pip(pip, (const sgp_point*)lines, count*2);
+    _sgp_draw_solid_pip(pip, (const sgp_point*)lines, count*2, _sgp.state.thickness);
 }
 
 void sgp_draw_line(float ax, float ay, float bx, float by) {
@@ -2088,7 +2100,7 @@ void sgp_draw_lines_strip(const sgp_point* points, uint32_t count) {
     SOKOL_ASSERT(_sgp.cur_state > 0);
     if(SOKOL_UNLIKELY(count == 0)) return;
     sg_pipeline pip = _sgp_lookup_pipeline(SG_PRIMITIVETYPE_LINE_STRIP, _sgp.state.blend_mode);
-    _sgp_draw_solid_pip(pip, points, count);
+    _sgp_draw_solid_pip(pip, points, count, _sgp.state.thickness);
 }
 
 void sgp_draw_filled_triangles(const sgp_triangle* triangles, uint32_t count) {
@@ -2096,7 +2108,7 @@ void sgp_draw_filled_triangles(const sgp_triangle* triangles, uint32_t count) {
     SOKOL_ASSERT(_sgp.cur_state > 0);
     if(SOKOL_UNLIKELY(count == 0)) return;
     sg_pipeline pip = _sgp_lookup_pipeline(SG_PRIMITIVETYPE_TRIANGLES, _sgp.state.blend_mode);
-    _sgp_draw_solid_pip(pip, (const sgp_point*)triangles, count*3);
+    _sgp_draw_solid_pip(pip, (const sgp_point*)triangles, count*3, 0.0f);
 }
 
 void sgp_draw_filled_triangle(float ax, float ay, float bx, float by, float cx, float cy) {
@@ -2111,7 +2123,7 @@ void sgp_draw_filled_triangles_strip(const sgp_point* points, uint32_t count) {
     SOKOL_ASSERT(_sgp.cur_state > 0);
     if(SOKOL_UNLIKELY(count == 0)) return;
     sg_pipeline pip = _sgp_lookup_pipeline(SG_PRIMITIVETYPE_TRIANGLE_STRIP, _sgp.state.blend_mode);
-    _sgp_draw_solid_pip(pip, points, count);
+    _sgp_draw_solid_pip(pip, points, count, 0.0f);
 }
 
 void sgp_draw_filled_rects(const sgp_rect* rects, uint32_t count) {
@@ -2348,3 +2360,4 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
+
